@@ -2,6 +2,7 @@ using System;
 using UnityEngine;
 using Firebase.Auth;
 using Firebase.Extensions;
+using Firebase.Firestore;
 using TMPro;
 
 public class AuthManager : MonoBehaviour
@@ -12,14 +13,16 @@ public class AuthManager : MonoBehaviour
   [SerializeField] private TMP_Text statusText;
 
   private FirebaseAuth auth;
+  private FirebaseFirestore db;
 
   private void Awake()
   {
-    // Delay FirebaseAuth creation until FirebaseBootstrap is ready
+    // Firebase will be initialized by FirebaseBootstrap first
     auth = null;
+    db = null;
   }
 
-  // Called by the Sign Up button
+  // Called by Register button
   public void OnSignUpPressed()
   {
     string email = GetText(emailInput);
@@ -35,7 +38,7 @@ public class AuthManager : MonoBehaviour
     });
   }
 
-  // Called by the Login button
+  // Called by Login button
   public void OnLoginPressed()
   {
     string email = GetText(emailInput);
@@ -60,7 +63,7 @@ public class AuthManager : MonoBehaviour
     });
   }
 
-  // Core signup logic
+  // Create Firebase account
   public void SignUp(string email, string password, Action<string> onResult)
   {
     if (!EnsureAuth(onResult)) return;
@@ -80,11 +83,17 @@ public class AuthManager : MonoBehaviour
           return;
         }
 
-        onResult?.Invoke("Sign up successful.");
+        // account created successfully
+        string uid = auth.CurrentUser.UserId;
+
+        CreateUserDocument(uid, email, result =>
+        {
+          onResult?.Invoke(result);
+        });
       });
   }
 
-  // Core login logic
+  // Login existing user
   public void Login(string email, string password, Action<string> onResult)
   {
     if (!EnsureAuth(onResult)) return;
@@ -108,7 +117,39 @@ public class AuthManager : MonoBehaviour
       });
   }
 
-  // Logout logic
+  // Save player profile in Firestore
+  private void CreateUserDocument(string uid, string email, Action<string> onResult)
+  {
+    if (db == null)
+    {
+      db = FirebaseFirestore.DefaultInstance;
+    }
+
+    var userData = new
+    {
+      email = email,
+      createdAt = Timestamp.GetCurrentTimestamp(),
+      bestScore = 0,
+      highestLevel = 1,
+      health = 100,
+      hunger = 100
+    };
+
+    db.Collection("users").Document(uid).SetAsync(userData)
+      .ContinueWithOnMainThread(task =>
+      {
+        if (task.IsCompleted)
+        {
+          onResult?.Invoke("Account created and saved to database.");
+        }
+        else
+        {
+          onResult?.Invoke("Account created but database write failed.");
+        }
+      });
+  }
+
+  // Logout
   public void Logout(Action<string> onResult)
   {
     if (auth != null)
@@ -119,7 +160,7 @@ public class AuthManager : MonoBehaviour
     onResult?.Invoke("Logged out.");
   }
 
-  // Makes sure Firebase and Auth are ready
+  // Make sure Firebase is ready
   private bool EnsureAuth(Action<string> onResult)
   {
     if (!FirebaseBootstrap.Ready)
@@ -133,10 +174,15 @@ public class AuthManager : MonoBehaviour
       auth = FirebaseAuth.DefaultInstance;
     }
 
+    if (db == null)
+    {
+      db = FirebaseFirestore.DefaultInstance;
+    }
+
     return true;
   }
 
-  // Simple input validation
+  // Check user inputs
   private bool ValidateInputs(string email, string password)
   {
     if (string.IsNullOrWhiteSpace(email))
@@ -160,13 +206,13 @@ public class AuthManager : MonoBehaviour
     return true;
   }
 
-  // Helper to safely get text from input fields
+  // safely read input field text
   private string GetText(TMP_InputField field)
   {
     return field == null ? "" : field.text.Trim();
   }
 
-  // Update UI and log for debugging
+  // update UI and log
   private void SetStatus(string message)
   {
     Debug.Log(message);
